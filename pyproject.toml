@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "agentaudit"
+version = "0.1.0"
+description = "CLI red-teaming tool for AI security systems"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Bhuvan Garg" }]
+keywords = ["ai-security", "red-teaming", "llm", "adversarial", "cli"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Topic :: Security",
+    "Programming Language :: Python :: 3.11",
+]
+dependencies = [
+    "click>=8.1",
+    "rich>=13.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4",
+    "pytest-cov>=4.1",
+    "mypy>=1.8",
+    "ruff>=0.3",
+]
+
+[project.scripts]
+agentaudit = "agentaudit.cli:cli"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--tb=short -q"
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+ignore_missing_imports = true
