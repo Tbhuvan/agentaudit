@@ -104,7 +104,7 @@ pytest tests/ -v --cov=agentaudit --cov=modes
 
 ## Research Context
 
-Part of the [ActivGuard](https://github.com/Tbhuvan/activguard) research programme. AgentAudit provides robustness evaluation for all ActivGuard layers, ensuring defences are hardened against adversarial evasion before deployment.
+Part of the [ActivGuard](https://github.com/Tbhuvan/activguard) research programme. A security tool that can't survive adversarial red-teaming before publication won't survive production either — AgentAudit closes that loop.
 
 ## License
 
