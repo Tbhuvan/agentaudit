@@ -21,7 +21,10 @@ from __future__ import annotations
 import re
 import uuid
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from modes.real_probe_connector import RealProbeConnector
 
 
 # ---------------------------------------------------------------------------
@@ -306,6 +309,7 @@ class ProbeBypassAttack:
         self,
         probe: Any | None = None,
         n_iterations: int = 10,
+        real_connector: "RealProbeConnector | None" = None,
     ) -> None:
         """
         Initialise the bypass attacker.
@@ -314,6 +318,12 @@ class ProbeBypassAttack:
             probe: Optional callable acting as the target probe.
                    Must accept code (str) and return {"label": "vulnerable"|"safe"}.
             n_iterations: Number of bypass attempts to make per run.
+            real_connector: Optional RealProbeConnector instance.  When provided
+                and real_connector.is_real() is True, the connector is used in
+                preference to both ``probe`` and the built-in simulated probe.
+                When real_connector.is_real() is False (i.e. it wraps simulation)
+                it is still used so that confidence / source metadata from the
+                connector propagate through to results.
 
         Raises:
             ValueError: If n_iterations is not a positive integer.
@@ -322,6 +332,7 @@ class ProbeBypassAttack:
             raise ValueError(f"n_iterations must be a positive integer, got {n_iterations}")
         self.probe = probe
         self.n_iterations = n_iterations
+        self.real_connector = real_connector
         self._bypass_count = 0
         self._attempt_count = 0
         self._results: list[BypassResult] = []
@@ -442,6 +453,34 @@ class ProbeBypassAttack:
         bypasses = [r.to_dict() for r in self._results if r.bypassed]
         bypass_rate = self._bypass_count / self._attempt_count if self._attempt_count else 0.0
 
+        # Per-strategy bypass rates ----------------------------------------
+        # Accumulate attempts and successes keyed by strategy name
+        strategy_attempts: dict[str, int] = {}
+        strategy_successes: dict[str, int] = {}
+        for r in self._results:
+            strategy_attempts[r.strategy] = strategy_attempts.get(r.strategy, 0) + 1
+            if r.bypassed:
+                strategy_successes[r.strategy] = strategy_successes.get(r.strategy, 0) + 1
+
+        bypass_rate_vs_strategy: dict[str, float] = {
+            s: round(strategy_successes.get(s, 0) / cnt, 4)
+            for s, cnt in strategy_attempts.items()
+        }
+
+        # strategy_effectiveness: fraction of strategies that achieved ≥1 bypass
+        n_effective = sum(1 for v in bypass_rate_vs_strategy.values() if v > 0)
+        n_total_strategies = len(bypass_rate_vs_strategy)
+        strategy_effectiveness = (
+            round(n_effective / n_total_strategies, 4) if n_total_strategies else 0.0
+        )
+
+        # Probe type label for downstream consumers
+        probe_type: str
+        if self.real_connector is not None and self.real_connector.is_real():
+            probe_type = "real"
+        else:
+            probe_type = "simulated"
+
         return {
             "vuln_class": vuln_class,
             "n_iterations": self._attempt_count,
@@ -449,6 +488,9 @@ class ProbeBypassAttack:
             "bypass_rate": round(bypass_rate, 4),
             "bypasses": bypasses,
             "attempts": [r.to_dict() for r in self._results],
+            "bypass_rate_vs_strategy": bypass_rate_vs_strategy,
+            "strategy_effectiveness": strategy_effectiveness,
+            "probe_type": probe_type,
         }
 
     def generate_redbench_entries(self) -> list[dict[str, Any]]:
@@ -497,7 +539,20 @@ class ProbeBypassAttack:
         return _BYPASS_TEMPLATES[vuln_class]
 
     def _query_probe(self, code: str) -> dict[str, Any]:
-        """Query the probe (or simulate if no probe is available)."""
+        """
+        Query the probe using the highest-priority available backend.
+
+        Priority:
+          1. real_connector (when is_real() is True)
+          2. real_connector (even when simulation-backed, for metadata consistency)
+          3. self.probe callable
+          4. Built-in _simulated_probe
+        """
+        if self.real_connector is not None:
+            result = self.real_connector.predict(code)
+            # Normalise to the same shape the rest of the class expects
+            if isinstance(result, dict) and "label" in result:
+                return result
         if self.probe is not None:
             try:
                 result = self.probe(code)
@@ -506,7 +561,7 @@ class ProbeBypassAttack:
             except Exception:
                 pass
             return {"label": "safe", "confidence": 0.5}
-        # Simulated probe: detects only the most obvious patterns
+        # Built-in simulated probe: detects only the most obvious patterns
         return self._simulated_probe(code)
 
     def _simulated_probe(self, code: str) -> dict[str, Any]:
